@@ -1,0 +1,214 @@
+name: Build Mod
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-2025
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache SpriggitCLI v0.40.0
+        id: cache-spriggit
+        uses: actions/cache@v4
+        with:
+          path: bin\SpriggitCLI-v0.40.0
+          key: spriggit-cli-v0.40.0
+
+      - name: Download and extract SpriggitCLI v0.40.0
+        if: steps.cache-spriggit.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/Mutagen-Modding/Spriggit/releases/download/0.40.0/SpriggitCLI.zip" -OutFile "bin\SpriggitCLI.zip"
+          Expand-Archive -Path "bin\SpriggitCLI.zip" -DestinationPath "bin\SpriggitCLI-v0.40.0"
+          Remove-Item "bin\SpriggitCLI.zip"
+      
+      - name: Cache Caprica v0.3.0a
+        id: cache-caprica
+        uses: actions/cache@v4
+        with:
+          path: bin\Caprica-v0.3.0a
+          key: caprica-v0.3.0a
+
+      - name: Download and extract Caprica v0.3.0a
+        if: steps.cache-caprica.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/KrisV-777/Caprica/releases/download/0.3.0a/Caprica.zip" -OutFile "bin\Caprica.zip"
+          Expand-Archive -Path "bin\Caprica.zip" -DestinationPath "bin\Caprica-v0.3.0a"
+          Remove-Item "bin\Caprica.zip"
+      
+      - name: Cache Papryus Script Stub
+        id: cache-scriptstub
+        uses: actions/cache@v4
+        with:
+          path: bin\ScriptStub
+          key: scriptstub-v0.1.0
+      
+      - name: Checkout Papryus Script Stub
+        if: steps.cache-scriptstub.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: IHateMyKite/PAPYRUS
+          ref: ae23267fe8f8d9c1ebad69c00ff3acf794b8d0eb
+          path: bin/ScriptStub
+          sparse-checkout: |
+            SRC
+          sparse-checkout-cone-mode: false
+          
+      - name: List bin folders
+        shell: pwsh
+        run: |
+          Write-Host "=== bin/ folder ==="
+          Get-ChildItem -Path bin -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
+          Write-Host "=== bin/SpriggitCLI-v0.40.0/ folder ==="
+          Get-ChildItem -Path "bin\SpriggitCLI-v0.40.0" -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
+          Write-Host "=== bin/Caprica-v0.3.0a/ folder ==="
+          Get-ChildItem -Path "bin\Caprica-v0.3.0a" -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
+          Write-Host "=== Checking bin/ScriptStub/Quest.psc ==="
+          Get-ChildItem "bin\ScriptStub\Qu*.psc" | Select-Object Name, Length, LastWriteTime
+          
+      - name: Papyrus Compile
+        shell: cmd
+        run: script\GTTest01-psc-to-pex.bat
+
+      - name: Verify SpriggitCLI.exe exists
+        shell: pwsh
+        run: |
+          $exe = "bin\SpriggitCLI-v0.40.0\Spriggit.CLI.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "ERROR: $exe not found! Aborting."
+            exit 1
+          }
+          Write-Host "SpriggitCLI found: $exe"
+
+      - name: Run yaml-to-esp conversion
+        shell: cmd
+        run: script\GTTest01-yaml-to-esp.bat
+
+      - name: Verify GTTest01.esp exists and is not empty
+        shell: pwsh
+        run: |
+          $espPath = "GTTest01\GTTest01.esp"
+          if (-not (Test-Path $espPath)) {
+            Write-Error "ERROR: $espPath not found! Aborting."
+            exit 1
+          }
+          $size = (Get-Item $espPath).Length
+          if ($size -eq 0) {
+            Write-Error "ERROR: $espPath is empty! Aborting."
+            exit 1
+          }
+          Write-Host "GTTest01.esp exists, size: $size bytes"
+
+      - name: Create yaml-out directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "GTTest01\yaml-out" | Out-Null
+
+      - name: Run esp-to-yaml conversion
+        shell: cmd
+        run: script\GTTest01-esp-to-yaml.bat
+
+      - name: Compare quest yaml files
+        shell: pwsh
+        run: |
+          $questFile = "Quests\GTQuest01 - 000800_GTTest01.esp.yaml"
+          $src = "GTTest01\yaml\$questFile"
+          $out = "GTTest01\yaml-out\$questFile"
+          Write-Host "=== Diff: $questFile (yaml/ vs yaml-out/) ==="
+          $srcLines = Get-Content $src
+          $outLines = Get-Content $out
+          $diff = Compare-Object $srcLines $outLines
+          if ($diff) {
+            $diff | ForEach-Object {
+              $indicator = if ($_.SideIndicator -eq '<=') { 'yaml/' } else { 'yaml-out/' }
+              Write-Host "[$indicator] $($_.InputObject)"
+            }
+            Write-Error "Quest YAML files differ!"
+            exit 1
+          }
+          Write-Host "Quest YAML files are identical."
+
+      - name: Compare RecordData.yaml
+        shell: pwsh
+        run: |
+          $src = "GTTest01\yaml\RecordData.yaml"
+          $out = "GTTest01\yaml-out\RecordData.yaml"
+          Write-Host "=== Diff: RecordData.yaml (yaml/ vs yaml-out/) ==="
+          $diff = Compare-Object (Get-Content $src) (Get-Content $out)
+          if ($diff) {
+            $diff | ForEach-Object {
+              $indicator = if ($_.SideIndicator -eq '<=') { 'yaml/' } else { 'yaml-out/' }
+              Write-Host "[$indicator] $($_.InputObject)"
+            }
+            Write-Error "RecordData.yaml files differ!"
+            exit 1
+          }
+          Write-Host "RecordData.yaml files are identical."
+
+      - name: Compare spriggit-meta.json
+        shell: pwsh
+        run: |
+          $src = "GTTest01\yaml\spriggit-meta.json"
+          $out = "GTTest01\yaml-out\spriggit-meta.json"
+          Write-Host "=== Diff: spriggit-meta.json (yaml/ vs yaml-out/) ==="
+          $diff = Compare-Object (Get-Content $src) (Get-Content $out)
+          if ($diff) {
+            $diff | ForEach-Object {
+              $indicator = if ($_.SideIndicator -eq '<=') { 'yaml/' } else { 'yaml-out/' }
+              Write-Host "[$indicator] $($_.InputObject)"
+            }
+            Write-Error "spriggit-meta.json files differ!"
+            exit 1
+          }
+          Write-Host "spriggit-meta.json files are identical."
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+
+          # SKSE plugins : not yet implemented/used
+          # New-Item -ItemType Directory -Force -Path "artifact\SKSE\Plugins" | Out-Null
+
+          # esp
+          Copy-Item "GTTest01\GTTest01.esp" -Destination "artifact\GTTest01.esp"
+
+          # papyrus .pex compiled
+          New-Item -ItemType Directory -Force -Path "artifact\scripts" | Out-Null
+          Copy-Item "GTTest01\papyrus_out\*.pex" -Destination "artifact\scripts\"
+
+          # papyrus .psc source
+          New-Item -ItemType Directory -Force -Path "artifact\scripts\source" | Out-Null
+          Copy-Item "GTTest01\papyrus_source\*.psc" -Destination "artifact\scripts\source\"
+
+          Write-Host "Artifact staged:"
+          Get-ChildItem -Recurse artifact | Format-Table FullName
+
+      - name: Pack artifact as zip
+        shell: pwsh
+        run: |
+          $datetime = Get-Date -Format "yyyy-MM-dd-HHmm"
+          $zipName = "GTTest01-$datetime.zip"
+          Compress-Archive -Path "artifact\*" -DestinationPath $zipName
+          Write-Host "Created $zipName"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GTTest01-mod
+          path: GTTest01-*.zip

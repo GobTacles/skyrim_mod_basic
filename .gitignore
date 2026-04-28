@@ -1,0 +1,22 @@
+# This file specifies files / folders which will be ignored by git.
+
+# IDE / text editor profile files
+/.vscode
+
+# Possible C++ build output directories and files
+/build
+/external
+/nogit
+*.dll
+*.pdb
+*.exe
+
+/example
+/bin
+/out
+/*/yaml-out/
+
+# Skyrim archive files
+*.bsa
+*.pex
+*.esp

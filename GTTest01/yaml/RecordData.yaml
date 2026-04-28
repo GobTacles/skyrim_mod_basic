@@ -1,0 +1,22 @@
+SpriggitSource:
+  PackageName: Spriggit.YAML.Skyrim
+  Version: 0.40
+ModKey: GTTest01.esp
+GameRelease: SkyrimSE
+ModHeader:
+  Stats:
+    Version: 0.1
+  Author: DEFAULT
+  Description: spriggit test mod
+  MasterReferences:
+  - Master: Skyrim.esm
+    FileSize: 0
+  - Master: Update.esm
+    FileSize: 0
+  - Master: Dawnguard.esm
+    FileSize: 0
+  - Master: HearthFires.esm
+    FileSize: 0
+  - Master: Dragonborn.esm
+    FileSize: 0
+  INTV: 1

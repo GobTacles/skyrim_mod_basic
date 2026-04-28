@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Wait for build workflow to complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for Build Mod workflow on commit ${{ github.sha }} ..."
+
+          # Wait until the build run appears (up to 200s)
+          RUN_ID=""
+          for i in $(seq 1 20); do
+            RUNS=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --commit "${{ github.sha }}" \
+              --workflow build.yml \
+              --json status,conclusion,databaseId,createdAt)
+            COUNT=$(echo "$RUNS" | jq 'length')
+            if [ "$COUNT" != "0" ]; then
+              RUN_ID=$(echo "$RUNS" | jq -r '.[0].databaseId')
+              CREATED_AT=$(echo "$RUNS" | jq -r '.[0].createdAt')
+              echo "Build run $RUN_ID found (started at $CREATED_AT)"
+              break
+            fi
+            echo "Attempt $i/20: build run not found yet, retrying in 10s..."
+            sleep 10
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "Build run not found after 200s. Aborting."
+            exit 1
+          fi
+
+          # Sleep until 90s have elapsed since the build started, to avoid early poll spam
+          CREATED_EPOCH=$(date -d "$CREATED_AT" +%s)
+          NOW_EPOCH=$(date +%s)
+          ELAPSED=$((NOW_EPOCH - CREATED_EPOCH))
+          WAIT_SECS=$((90 - ELAPSED))
+          if [ "$WAIT_SECS" -gt 0 ]; then
+            echo "Build started ${ELAPSED}s ago; sleeping ${WAIT_SECS}s to reach the 90s mark..."
+            sleep "$WAIT_SECS"
+          else
+            echo "Build started ${ELAPSED}s ago (already past 90s mark); polling immediately..."
+          fi
+
+          # Poll every 5s until completed
+          for i in $(seq 1 60); do
+            RUNS=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --commit "${{ github.sha }}" \
+              --workflow build.yml \
+              --json status,conclusion,databaseId)
+            STATUS=$(echo "$RUNS"     | jq -r '.[0].status')
+            CONCLUSION=$(echo "$RUNS" | jq -r '.[0].conclusion // ""')
+            echo "Poll $i/60: run $RUN_ID status=$STATUS conclusion=$CONCLUSION"
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "Build succeeded (run $RUN_ID)"
+                BUILD_RUN_ID=$RUN_ID
+                echo "BUILD_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+                break
+              else
+                echo "Build finished with non-success conclusion: $CONCLUSION"
+                exit 1
+              fi
+            fi
+            sleep 5
+          done
+          if [ -z "$BUILD_RUN_ID" ]; then
+            echo "Timed out waiting for build workflow to complete."
+            exit 1
+          fi
+
+      - name: Download build artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "$BUILD_RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name GTTest01-mod \
+            --dir artifact
+          ls -lh artifact/
+
+      - name: Rename zip for release (strip datetime suffix)
+        run: |
+          ZIP=$(ls artifact/GTTest01-*.zip)
+          mv "$ZIP" "GTTest01-${{ github.ref_name }}.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: GTTest01-${{ github.ref_name }}.zip
+          generate_release_notes: true

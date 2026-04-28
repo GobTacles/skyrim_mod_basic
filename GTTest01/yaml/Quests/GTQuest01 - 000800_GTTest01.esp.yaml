@@ -1,0 +1,47 @@
+FormKey: 000800:GTTest01.esp
+EditorID: GTQuest01
+VirtualMachineAdapter:
+  Scripts:
+  - Name: GTQuest01S
+  FileName: ''
+Name:
+  TargetLanguage: English
+  Value: GTQuest01
+Flags:
+- StartGameEnabled
+Type: SideQuest
+Stages:
+- Index: 100
+  LogEntries:
+  - Flags: []
+    Entry:
+      TargetLanguage: English
+      Value: This is a test log entry for stage 100.
+Objectives:
+- Index: 100
+  Flags: []
+  DisplayText:
+    TargetLanguage: English
+    Value: Find the mysterious object
+  Targets:
+  - {}
+- Index: 200
+  Flags: []
+  DisplayText:
+    TargetLanguage: English
+    Value: Talk to the village elder
+  Targets:
+  - {}
+- Index: 300
+  Flags: []
+  DisplayText:
+    TargetLanguage: English
+    Value: Return to your home
+  Targets:
+  - {}
+NextAliasID: 1
+Aliases:
+- Name: PlayerAlias
+  Flags: []
+  ForcedReference: 000014:Skyrim.esm
+  VoiceTypes: Null
